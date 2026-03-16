@@ -1,0 +1,57 @@
+import open_clip
+import torch
+import numpy as np
+from PIL import Image
+from torchvision import transforms
+import math
+
+class VideoExtract:
+    def __init__(self, model_name='ViT-L-14', output_dim=768, batch_size=128, size=(224, 224)):
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # Load model CLIP
+        self.model, _, self.preprocess = open_clip.create_model_and_transforms(
+            model_name=model_name, pretrained='openai', device=self.device
+        )
+        self.output_dim = output_dim
+        self.batch_size = batch_size
+        self.size = size
+
+    @torch.no_grad() # Quan trọng: Giúp GPU không bị tràn bộ nhớ
+    def __call__(self, frames):
+        # 1. Chuyển đổi mọi định dạng về Tensor (C, H, W)
+        if not isinstance(frames, torch.Tensor):
+            # Nếu là mảng Numpy thì chuyển sang PIL
+            if isinstance(frames[0], np.ndarray):
+                frames = [Image.fromarray(frame) for frame in frames]
+            
+            # Sử dụng transform chuẩn của CLIP để ảnh đẹp nhất
+            transform_small = transforms.Compose([
+                transforms.Resize(self.size),
+                transforms.CenterCrop(self.size),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
+            ])
+            frames = torch.stack([transform_small(frame) for frame in frames])
+
+        # 2. Đẩy dữ liệu lên GPU
+        frames = frames.to(self.device)
+        
+        num_frame = len(frames)
+        n_iter = math.ceil(num_frame / self.batch_size)
+        features = []
+
+        # 3. Trích xuất theo Batch
+        for i in range(n_iter):
+            start = i * self.batch_size
+            end = min((i + 1) * self.batch_size, num_frame)
+            
+            # Lấy đặc trưng từ image_encoder của CLIP
+            # Kết quả ra: (Batch_size, 768)
+            batch_features = self.model.encode_image(frames[start:end])
+            
+            # Normalize vector để tính toán chính xác hơn (đặc trưng của CLIP nên làm vậy)
+            batch_features /= batch_features.norm(dim=-1, keepdim=True)
+            features.append(batch_features)
+
+        # Trả về ma trận (N, 768)
+        return torch.cat(features, dim=0)

@@ -1,0 +1,6 @@
+*.mp4
+*.png
+*.jpg
+__pycache__/
+*.pyc
+.venv
