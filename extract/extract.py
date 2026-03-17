@@ -7,7 +7,7 @@ def extract_and_save(video_paths, model_name='ViT-L-14', output_dim=768, batch_s
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    loader = VideoLoader(video_paths, target_fps=target_fps, save_dir=save_dir)
+    loader = VideoLoader(video_paths, fps=target_fps, save_dir=save_dir)
     extractor = VideoExtract(model_name=model_name, output_dim=output_dim, batch_size=batch_size, size=size)
 
     for i, v in enumerate(loader):
