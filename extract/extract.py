@@ -27,7 +27,7 @@ def extract_and_save(
 
     for i, v in enumerate(dataloader):
         with torch.no_grad():
-            features = extractor(v)
+            features = extractor(v[0])
 
         video_name = os.path.basename(video_paths[i]).split('.')[0]
         save_path = os.path.join(save_dir, f"{video_name}.pt")
