@@ -3,6 +3,7 @@ import os
 from extract.video_loader import VideoLoader
 from torch.utils.data import DataLoader
 from extract.model_video_extract import VideoExtract
+from tqdm import tqdm
 
 def extract_and_save(
     video_paths,
@@ -25,7 +26,7 @@ def extract_and_save(
         size=size
     )
 
-    for i, v in enumerate(dataloader):
+    for i, v in enumerate(tqdm(dataloader)):
         with torch.no_grad():
             features = extractor(v[0])
 
