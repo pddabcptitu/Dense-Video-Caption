@@ -3,28 +3,21 @@ import os
 from extract.video_loader import VideoLoader
 from extract.model_video_extract import VideoExtract
 
-def extract_and_save(video_paths, save_dir='features_output'):
-    # Tạo thư mục lưu trữ nếu chưa có
+def extract_and_save(video_paths, model_name='ViT-L-14', output_dim=768, batch_size=128, size=(224, 224), save_dir='features_output', target_fps=2):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    # Khởi tạo loader và extractor
-    # batch_size=1 để đảm bảo mỗi lần loop là trọn vẹn 1 video
-    loader = VideoLoader(video_paths)
-    extractor = VideoExtract()
+    loader = VideoLoader(video_paths, target_fps=target_fps, save_dir=save_dir)
+    extractor = VideoExtract(model_name=model_name, output_dim=output_dim, batch_size=batch_size, size=size)
 
     for i, v in enumerate(loader):
-        # Vì DataLoader batch_size=1 trả về shape (1, N, 3, 224, 224)
-        # Ta lấy v[0] để đưa về (N, 3, 224, 224) cho extractor
-        features = extractor(v[0]) 
+        features = extractor(v) 
 
-        # Lấy tên file gốc để đặt tên cho file feature (ví dụ: video1.pt)
         video_name = os.path.basename(video_paths[i]).split('.')[0]
         save_path = os.path.join(save_dir, f"{video_name}.pt")
 
-        # Lưu lại dưới dạng file PyTorch (.pt) cực nhẹ
         torch.save(features, save_path)
         
-        print(f"Đã lưu feature của {video_name} - Shape: {features.shape}")
+        # print(f"Đã lưu feature của {video_name} - Shape: {features.shape}")
 
     print(f"--- Hoàn thành! Toàn bộ feature nằm trong: {save_dir} ---")

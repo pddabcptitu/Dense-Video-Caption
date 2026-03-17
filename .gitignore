@@ -3,4 +3,5 @@
 *.jpg
 __pycache__/
 *.pyc
-.venv
+.venv310
+.caches
