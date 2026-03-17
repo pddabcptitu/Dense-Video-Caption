@@ -10,9 +10,8 @@ import io
 # ========================
 # CONFIG
 # ========================
-
-CLIENT_SECRET_FILE = r"extract\driver token\drive_pdd.json"
-TOKEN_PATH = r"extract\driver token\token.pickle"
+CLIENT_SECRET_FILE = r"extract/driver token/drive_pdd.json"
+TOKEN_PATH = r"extract/driver token/token.pickle"
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
@@ -219,4 +218,4 @@ def list_all_files_with_id(folder_id=None):
 # all_videos = list_all_files_with_id('14yuk3BTCVgqsWJPSpaxMDu2Lmv7LpjjS')
 # print(len(all_videos))
 # print(list(all_videos.keys())[:5], list(all_videos.values())[:5])
-download_file('1FM2mXksAnUYrCEt0Lj34GQecabVTgvUM', 'test2.pt')
+# download_file('1FM2mXksAnUYrCEt0Lj34GQecabVTgvUM', 'test2.pt')

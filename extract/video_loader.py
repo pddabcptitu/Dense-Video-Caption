@@ -15,7 +15,7 @@ class VideoLoader(Dataset):
     
     def __getitem__(self, idx):
         if not self.is_local:
-            name = self.video_paths.keys()[idx]
+            name = list(self.video_paths.keys())[idx]
             id_ = self.video_paths[name]
             CURD_driver.download_file(id_, name)
             frames = get_frames(name, self.fps, self.size)

@@ -17,7 +17,10 @@ def extract_and_save(
     is_local=True
 ):
     os.makedirs(save_dir, exist_ok=True)
-    exists_paths = set(os.listdir(save_dir))
+    if is_local:
+        exists_paths = set(os.listdir(save_dir))
+    else:
+        exists_paths = set(CURD_driver.list_all_files_with_id('1lF_AiDorN7UpDE-W5_DHDUg4EX9sT4SO').keys())
 
     if is_local:
         video_paths = [
@@ -26,7 +29,7 @@ def extract_and_save(
         ]
     else:
         video_paths = CURD_driver.list_all_files_with_id('14yuk3BTCVgqsWJPSpaxMDu2Lmv7LpjjS')
-        video_paths = {video_path:video_paths[video_path] for video_path in video_paths if video_path not in exists_paths}
+        video_paths = {video_path:video_paths[video_path] for video_path in video_paths if (video_path.split('.')[0] + 'pt') not in exists_paths}
 
     loader = VideoLoader(video_paths, fps=target_fps, is_local=is_local)
     dataloader = DataLoader(loader, batch_size=1, shuffle=False)
@@ -37,7 +40,7 @@ def extract_and_save(
         batch_size=batch_size,
         size=size
     )
-    video_paths = video_paths.keys()
+    video_paths = list(video_paths.keys())
     for i, v in enumerate(tqdm(dataloader)):
         try:
             with torch.no_grad():
