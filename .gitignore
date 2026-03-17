@@ -6,3 +6,5 @@ __pycache__/
 .venv310
 .caches
 huggingface/
+*.json
+driver token/

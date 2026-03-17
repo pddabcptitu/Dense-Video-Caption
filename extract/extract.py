@@ -4,17 +4,68 @@ from extract.video_loader import VideoLoader
 from torch.utils.data import DataLoader
 from extract.model_video_extract import VideoExtract
 from tqdm import tqdm
+from extract.utils import CURD_driver
 
 def extract_and_save(
-    video_paths,
+    video_paths=None,
     model_name='ViT-L-14',
     output_dim=768,
     batch_size=128,
     size=(224, 224),
     save_dir='features_output',
-    target_fps=2
+    target_fps=2,
+    is_local=True
 ):
     os.makedirs(save_dir, exist_ok=True)
+    exists_paths = set(os.listdir(save_dir))
+
+    if is_local:
+        video_paths = [
+            path for path in video_paths
+            if os.path.basename(path).split('.')[0] + '.pt' not in exists_paths
+        ]
+    else:
+        video_paths = CURD_driver.list_all_files_with_id('14yuk3BTCVgqsWJPSpaxMDu2Lmv7LpjjS')
+        video_paths = {video_path:video_paths[video_path] for video_path in video_paths if video_path not in exists_paths}
+
+    loader = VideoLoader(video_paths, fps=target_fps, is_local=is_local)
+    dataloader = DataLoader(loader, batch_size=1, shuffle=False)
+
+    extractor = VideoExtract(
+        model_name=model_name,
+        output_dim=output_dim,
+        batch_size=batch_size,
+        size=size
+    )
+    video_paths = video_paths.keys()
+    for i, v in enumerate(tqdm(dataloader)):
+        try:
+            with torch.no_grad():
+                features = extractor(v[0])
+
+            video_name = os.path.basename(video_paths[i]).split('.')[0]
+            save_path = os.path.join(save_dir, f"{video_name}.pt")
+
+            torch.save(features.cpu(), save_path)
+            if not is_local:
+                CURD_driver.upload_file(save_path, '1lF_AiDorN7UpDE-W5_DHDUg4EX9sT4SO')
+            os.remove(save_path)
+
+        except Exception as e:
+            print(f"❌ Skip video: {video_paths[i]}")
+            print(f"Error: {e}")
+            continue
+
+    print(f"--- Hoàn thành! Toàn bộ feature nằm trong: {save_dir} ---")
+
+def extract(
+    video_paths,
+    model_name='ViT-L-14',
+    output_dim=768,
+    batch_size=128,
+    size=(224, 224),
+    target_fps=2
+):
 
     loader = VideoLoader(video_paths, fps=target_fps)
     dataloader = DataLoader(loader, batch_size=1, shuffle=False)
@@ -26,13 +77,16 @@ def extract_and_save(
         size=size
     )
 
+    features_video = []
     for i, v in enumerate(tqdm(dataloader)):
-        with torch.no_grad():
-            features = extractor(v[0])
+        try:
+            with torch.no_grad():
+                features = extractor(v[0])
+            features_video.append(features)
+        except Exception as e:
+            print(f"❌ Skip video: {video_paths[i]}")
+            print(f"Error: {e}")
+            continue
 
-        video_name = os.path.basename(video_paths[i]).split('.')[0]
-        save_path = os.path.join(save_dir, f"{video_name}.pt")
-
-        torch.save(features.cpu(), save_path)
-
-    print(f"--- Hoàn thành! Toàn bộ feature nằm trong: {save_dir} ---")
+    print(f"--- Hoàn thành! ---")
+    return features_video
