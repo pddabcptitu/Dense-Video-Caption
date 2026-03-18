@@ -59,18 +59,17 @@ def extract_and_save(
             with torch.no_grad():
                 features = extractor(frames)
 
-            for feat, name in zip(features, names):
-                video_name = os.path.basename(name).split('.')[0]
-                save_path = os.path.join(save_dir, f"{video_name}.pt")
+            video_name = os.path.basename(names).split('.')[0]
+            save_path = os.path.join(save_dir, f"{video_name}.pt")
 
-                torch.save(feat.cpu(), save_path)
+            torch.save(features.cpu(), save_path)
 
-                if not is_local:
-                    CURD_driver.upload_file(save_path, '1lF_AiDorN7UpDE-W5_DHDUg4EX9sT4SO')
-                    os.remove(save_path)
+            if not is_local:
+                CURD_driver.upload_file(save_path, '1lF_AiDorN7UpDE-W5_DHDUg4EX9sT4SO')
+                os.remove(save_path)
 
         except Exception as e:
-            print(f"❌ Skip video: {name}")
+            print(f"❌ Skip video: {names}")
             print(f"Error: {e}")
             continue
     print(f"--- Hoàn thành! Toàn bộ feature nằm trong: {save_dir} ---")
