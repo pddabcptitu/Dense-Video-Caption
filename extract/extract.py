@@ -32,7 +32,12 @@ def extract_and_save(
         video_paths = {video_path:video_paths[video_path] for video_path in video_paths if (video_path.split('.')[0] + 'pt') not in exists_paths}
 
     loader = VideoLoader(video_paths, fps=target_fps, is_local=is_local)
-    dataloader = DataLoader(loader, batch_size=1, shuffle=False)
+    def collate_fn(batch):
+        batch = [x for x in batch if x[0] is not None]
+        if len(batch) == 0:
+            return None
+        return torch.utils.data.dataloader.default_collate(batch)
+    dataloader = DataLoader(loader, batch_size=1, shuffle=False, collate_fn=collate_fn)
 
     extractor = VideoExtract(
         model_name=model_name,
@@ -40,25 +45,34 @@ def extract_and_save(
         batch_size=batch_size,
         size=size
     )
-    video_paths = list(video_paths.keys())
-    for i, v in enumerate(tqdm(dataloader)):
+    if not is_local:
+        video_paths = list(video_paths.keys())
+    for v in tqdm(dataloader):
         try:
+            if v is None:
+                continue
+
+            frames, names = v
+            frames = frames[0]
+            names = names[0]
+
             with torch.no_grad():
-                features = extractor(v[0])
+                features = extractor(frames)
 
-            video_name = os.path.basename(video_paths[i]).split('.')[0]
-            save_path = os.path.join(save_dir, f"{video_name}.pt")
+            for feat, name in zip(features, names):
+                video_name = os.path.basename(name).split('.')[0]
+                save_path = os.path.join(save_dir, f"{video_name}.pt")
 
-            torch.save(features.cpu(), save_path)
-            if not is_local:
-                CURD_driver.upload_file(save_path, '1lF_AiDorN7UpDE-W5_DHDUg4EX9sT4SO')
-            os.remove(save_path)
+                torch.save(feat.cpu(), save_path)
+
+                if not is_local:
+                    CURD_driver.upload_file(save_path, '1lF_AiDorN7UpDE-W5_DHDUg4EX9sT4SO')
+                    os.remove(save_path)
 
         except Exception as e:
-            print(f"❌ Skip video: {video_paths[i]}")
+            print(f"❌ Skip video: {name}")
             print(f"Error: {e}")
             continue
-
     print(f"--- Hoàn thành! Toàn bộ feature nằm trong: {save_dir} ---")
 
 def extract(

@@ -22,6 +22,7 @@ class VideoLoader(Dataset):
             os.remove(name)
         else:
             video_path = self.video_paths[idx]
+            name = os.path.basename(video_path)
             frames = get_frames(video_path, self.fps, self.size)
 
-        return frames
+        return frames, name
