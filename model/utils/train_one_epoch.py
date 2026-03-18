@@ -4,7 +4,9 @@ from model.datasets.video_dataset import VideoCaptionDataset
 import torch
 
 def collate_fn(batchs):
-    batchs = [b for b in batchs if b[0] is not None]
+    if batchs is None:
+      return None
+    batchs = [b for b in batchs if b is not None]
 
     if len(batchs) == 0:
         return None
@@ -35,8 +37,8 @@ def train_one_epoch(
 
         optimizer.zero_grad()
         features, attention_mask, captions = data
-        features.to(device)
-        attention_mask.to(device)
+        features = features.to(device)
+        attention_mask = attention_mask.to(device)
         video = {
             'video_features': features,
             'attention_mask': attention_mask
@@ -65,7 +67,7 @@ def evaluate(model, tokenizer, val_loader):
 
             features, attention_mask, captions = data
             features = features.to(device)
-            attention_mask.to(device)
+            attention_mask = attention_mask.to(device)
             video = {
                 'video_features': features,
                 'attention_mask': attention_mask
@@ -73,7 +75,7 @@ def evaluate(model, tokenizer, val_loader):
             outputs = model(video, captions)
             
             # với ViT + T5 model, loss được trả về là .loss
-            loss = outputs.loss  
+            loss = outputs['loss']
             total_loss += loss.item()
             n_batches += 1
 
