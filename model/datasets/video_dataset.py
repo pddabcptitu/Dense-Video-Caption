@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import Dataset
 import os
 
-class DenseVideoCaptioning_Dataset(Dataset):
+class VideoCaptionDataset(Dataset):
     def __init__(self, data, feature_dir, max_len=300):
         self.data = data
         self.feature_dir = feature_dir
