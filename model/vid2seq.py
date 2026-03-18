@@ -61,16 +61,19 @@ class DenseVideoCation(nn.Module):
 
 
     def forward(self, video_features, labels: str):
-        
-        visual_embeds = self.visual_encoder(video_features)
+        if isinstance(video_features, dict):
+            attention_mask = video_features['attention_mask']
+            video_features = video_features['video_features']
+            visual_embeds = self.visual_encoder(video_features)
 
+        else:
+            visual_embeds = self.visual_encoder(video_features)
+            attention_mask = torch.ones(
+                visual_embeds.size()[:-1],
+                dtype=torch.long,
+                device=visual_embeds.device
+            )
         visual_embeds = self.projection(visual_embeds)
-
-        attention_mask = torch.ones(
-            visual_embeds.size()[:-1],
-            dtype=torch.long,
-            device=visual_embeds.device
-        )
 
         tokenized = self.tokenizer(
             labels,
@@ -88,5 +91,40 @@ class DenseVideoCation(nn.Module):
             attention_mask=attention_mask,
             labels=input_ids
         )
+        loss = outputs.loss
 
-        return outputs
+        return {"loss": loss}
+
+    @torch.no_grad()
+    def generate(self, video_features, max_length=512, num_beams=3):
+        self.eval()
+
+        # 1. Encode video
+        visual_embeds = self.visual_encoder(video_features)
+
+        # 2. Projection sang T5 dim
+        visual_embeds = self.projection(visual_embeds)
+
+        # 3. Attention mask
+        attention_mask = torch.ones(
+            visual_embeds.size()[:-1],
+            dtype=torch.long,
+            device=visual_embeds.device
+        )
+
+        # 4. Generate text
+        outputs = self.t5_model.generate(
+            inputs_embeds=visual_embeds,
+            attention_mask=attention_mask,
+            max_length=max_length,
+            num_beams=num_beams,
+            early_stopping=True
+        )
+
+        # 5. Decode
+        captions = self.tokenizer.batch_decode(
+            outputs,
+            skip_special_tokens=True
+        )
+
+        return captions
