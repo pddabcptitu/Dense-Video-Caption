@@ -1,6 +1,8 @@
 import torch
 from torch.utils.data import Dataset
 import os
+from model.utils.convert_to_dvc import convert_activitynet
+
 
 class VideoCaptionDataset(Dataset):
     def __init__(self, data, feature_dir, max_len=300):
@@ -31,7 +33,7 @@ class VideoCaptionDataset(Dataset):
         item = self.data[idx]
 
         video_id = item["video_id"]
-        caption = item["caption"]
+        caption = convert_activitynet(item)
 
         try:
             path = os.path.join(self.feature_dir, f"{video_id}.pt")
