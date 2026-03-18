@@ -46,10 +46,13 @@ def train_one_epoch(
         out = model(video, captions)
         loss = out['loss']
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         total_loss += loss.item()
         num_batches += 1
         optimizer.step()
-    avg_loss = loss/num_batches if num_batches > 0 else 0
+
+    avg_loss = total_loss/num_batches if num_batches > 0 else 0
     print(f"Train loss: {avg_loss:.4f}")
     return avg_loss
 
