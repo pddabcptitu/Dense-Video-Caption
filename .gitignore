@@ -8,3 +8,7 @@ __pycache__/
 huggingface/
 *.json
 driver token/
+*.pt
+*.pth
+*.model
+*.bin

@@ -2,19 +2,19 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 import os
 
 def load_tokenizer(local_path=None, num_bins=0):
-    local_path = local_path if local_path is not None else "VietAI/vit5-base-vietnews-summarization"
+    local_path = local_path if local_path is not None else "google-t5/t5-base"
     tokenizer = AutoTokenizer.from_pretrained(local_path)
     
     # Tạo danh sách token thời gian: <times=0>, <times=1>, ...
     new_tokens = [f'<times={i}>' for i in range(num_bins)]
-    
+    print(new_tokens)
     if new_tokens:
         # Thêm vào tokenizer
         tokenizer.add_tokens(new_tokens)
     return tokenizer
 
 def load_model(tokenizer, local_path=None):
-    local_path = local_path if local_path is not None else "VietAI/vit5-base-vietnews-summarization"
+    local_path = local_path if local_path is not None else "google-t5/t5-base"
     model = AutoModelForSeq2SeqLM.from_pretrained(local_path)
     
     # Quan trọng: Truyền len(tokenizer) đã được thêm tokens mới
