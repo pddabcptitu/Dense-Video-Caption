@@ -25,11 +25,15 @@ def extract_and_save(
     if is_local:
         video_paths = [
             path for path in video_paths
-            if os.path.basename(path).split('.')[0] + '.pt' not in exists_paths
+            if os.path.splitext(os.path.basename(path))[0] + '.pt' not in exists_paths
         ]
     else:
         video_paths = CURD_driver.list_all_files_with_id('14yuk3BTCVgqsWJPSpaxMDu2Lmv7LpjjS')
-        video_paths = {video_path:video_paths[video_path] for video_path in video_paths if (video_path.split('.')[0] + 'pt') not in exists_paths}
+        video_paths = {
+            video_path: video_paths[video_path]
+            for video_path in video_paths
+            if os.path.splitext(video_path)[0] + '.pt' not in exists_paths
+        }
 
     loader = VideoLoader(video_paths, fps=target_fps, is_local=is_local)
     def collate_fn(batch):
