@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from model.vit import VisionTransformer
 from model import t5
-from transformers.modeling_outputs import BaseModelOutput
 
 
 class Projection(nn.Module):
@@ -11,15 +11,16 @@ class Projection(nn.Module):
         self.proj = nn.Linear(in_dim, out_dim)
         self.norm = nn.LayerNorm(out_dim)
         self.drop = nn.Dropout(drop)
+        self.scale = nn.Parameter(torch.ones(1) * 0.1)
 
     def forward(self, x):
         x = self.proj(x)
         x = self.norm(x)
         x = self.drop(x)
-        return x
+        return x * self.scale
 
 
-class DenseVideoCation(nn.Module):
+class DenseVideoCaption(nn.Module):
     def __init__(self,
                  t5_path,
                  num_features=100,
@@ -28,14 +29,12 @@ class DenseVideoCation(nn.Module):
                  heads=12,
                  mlp_dim=2048,
                  vis_drop=0.,
-                 tokenizer=None,
-                 enc_drop=0.,
                  dec_drop=0.1,
-                 use_speech=True,
-                 use_video=True,
-                 num_bins=0,
-                 label_smoothing=0.1):
+                 num_bins=100):
         super().__init__()
+
+        # FIX 1: lưu num_bins để dùng trong forward()
+        self.num_bins = num_bins
 
         self.visual_encoder = VisionTransformer(
             num_features=num_features,
@@ -55,85 +54,116 @@ class DenseVideoCation(nn.Module):
 
         self.projection = Projection(
             in_dim=embed_dim,
-            out_dim=self.t5_model.config.d_model 
+            out_dim=self.t5_model.config.d_model,
+            drop=dec_drop
         )
 
-        self.use_video = use_video
+        # Cache time token ids — tránh tính lại mỗi forward pass
+        self._time_token_ids = None
 
+    def _get_time_token_ids(self, device):
+        if self._time_token_ids is None:
+            ids = [
+                self.tokenizer.convert_tokens_to_ids(f"<times={i}>")
+                for i in range(self.num_bins)
+            ]
+            self._time_token_ids = torch.tensor(ids)
+        return self._time_token_ids.to(device)
 
     def forward(self, video_features, labels: str):
         if isinstance(video_features, dict):
             attention_mask = video_features['attention_mask']
             video_features = video_features['video_features']
-            visual_embeds = self.visual_encoder(video_features)
-
         else:
-            visual_embeds = self.visual_encoder(video_features)
+            attention_mask = None
+
+        visual_embeds = self.visual_encoder(video_features)
+        visual_embeds = self.projection(visual_embeds)
+
+        if attention_mask is None:
             attention_mask = torch.ones(
                 visual_embeds.size()[:-1],
                 dtype=torch.long,
                 device=visual_embeds.device
             )
-        visual_embeds = self.projection(visual_embeds)
 
         tokenized = self.tokenizer(
             labels,
             padding=True,
             truncation=True,
+            max_length=256,
             return_tensors="pt"
         )
 
         input_ids = tokenized.input_ids.to(visual_embeds.device)
-
         input_ids[input_ids == self.tokenizer.pad_token_id] = -100
-        
-        encoder_outputs = BaseModelOutput(
-            last_hidden_state=visual_embeds
-        )
-        
-        outputs = self.t5_model(
-            encoder_outputs=encoder_outputs,
+
+        # Per-token loss để weight riêng time tokens
+        logits = self.t5_model(
+            inputs_embeds=visual_embeds,
             attention_mask=attention_mask,
             labels=input_ids
-        )
+        ).logits  # (B, T, vocab)
 
-        loss = outputs.loss
+        per_token_loss = F.cross_entropy(
+            logits.view(-1, logits.size(-1)),
+            input_ids.view(-1),
+            reduction='none',
+            ignore_index=-100
+        ).view(input_ids.shape)  # (B, T)
+
+        # Time token weight 2.0: ép model học timestamp tốt hơn
+        time_token_ids = self._get_time_token_ids(input_ids.device)
+        is_time_token = torch.isin(input_ids, time_token_ids)
+        weight = torch.where(is_time_token,
+                             torch.tensor(2.0, device=input_ids.device),
+                             torch.tensor(1.0, device=input_ids.device))
+
+        valid = (input_ids != -100).float()
+        loss = (per_token_loss * weight * valid).sum() / valid.sum()
 
         return {"loss": loss}
 
     @torch.no_grad()
-    def generate(self, video_features, max_length=512, num_beams=3):
+    def generate(self, video_features, max_length=200, num_beams=5):
         self.eval()
 
-        # 1. Encode video
-        visual_embeds = self.visual_encoder(video_features)
+        # FIX 2: handle dict input (batch có padding)
+        if isinstance(video_features, dict):
+            attention_mask = video_features['attention_mask']
+            video_features = video_features['video_features']
+        else:
+            attention_mask = None
 
-        # 2. Projection sang T5 dim
+        visual_embeds = self.visual_encoder(video_features)
         visual_embeds = self.projection(visual_embeds)
 
-        # 3. Attention mask
-        attention_mask = torch.ones(
-            visual_embeds.size()[:-1],
-            dtype=torch.long,
-            device=visual_embeds.device
-        )
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                visual_embeds.size()[:-1],
+                dtype=torch.long,
+                device=visual_embeds.device
+            )
 
-        encoder_outputs = BaseModelOutput(
-            last_hidden_state=visual_embeds
-        )
-        
         outputs = self.t5_model.generate(
-            encoder_outputs=encoder_outputs,
+            inputs_embeds=visual_embeds,
             attention_mask=attention_mask,
             max_length=max_length,
             num_beams=num_beams,
-            early_stopping=True
+            early_stopping=True,
+            no_repeat_ngram_size=3,
+            repetition_penalty=1.3,
+            length_penalty=0.8,
         )
 
-        # 5. Decode
+        # FIX 3: skip_special_tokens=False để giữ <times=N> trong output
         captions = self.tokenizer.batch_decode(
             outputs,
-            skip_special_tokens=True
+            skip_special_tokens=False
         )
+
+        # Chỉ xóa padding token, giữ lại time tokens
+        pad_token = self.tokenizer.pad_token
+        captions = [c.replace(pad_token, '').strip() for c in captions]
 
         return captions
