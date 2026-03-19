@@ -117,12 +117,16 @@ class DenseVideoCaption(nn.Module):
         # Time token weight 2.0: ép model học timestamp tốt hơn
         time_token_ids = self._get_time_token_ids(input_ids.device)
         is_time_token = torch.isin(input_ids, time_token_ids)
-        weight = torch.where(is_time_token,
-                             torch.tensor(2.0, device=input_ids.device),
-                             torch.tensor(1.0, device=input_ids.device))
+        
+        # Create weight tensor on proper device with gradient tracking
+        weight = torch.ones_like(input_ids, dtype=torch.float32)
+        weight[is_time_token] = 2.0
 
+        # Only keep loss for valid tokens (not -100)
         valid = (input_ids != -100).float()
-        loss = (per_token_loss * weight * valid).sum() / valid.sum()
+        weighted_loss = (per_token_loss * weight * valid).sum()
+        num_valid = valid.sum().clamp(min=1e-8)  # Avoid division by zero
+        loss = weighted_loss / num_valid
 
         return {"loss": loss}
 

@@ -35,6 +35,11 @@ class VideoCaptionDataset(Dataset):
 
         video_id = item["video_id"]
         caption = convert_activitynet(item)
+        
+        # FIX: Check tokenizer is initialized
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer not provided. Pass tokenizer to VideoCaptionDataset.__init__")
+        
         # FIX: Tokenize once and extract only tensor components for better multiprocessing
         tokenized = self.tokenizer(
             caption,
