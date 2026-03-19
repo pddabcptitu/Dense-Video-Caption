@@ -93,6 +93,7 @@ def evaluate(model, tokenizer, val_loader):
             
             # với ViT + T5 model, loss được trả về là .loss
             loss = outputs['loss']
+            loss = loss.mean()
             
             total_loss += loss.item()
             n_batches += 1
