@@ -12,13 +12,22 @@ def collate_fn(batchs):
         return None
 
     features = [b[0] for b in batchs]
-    attention_mask = [b[1] for b in batchs]
-    captions = [b[-1] for b in batchs]
+    feature_masks = [b[1] for b in batchs]
+    label_input_ids = [b[2] for b in batchs]
+    label_attention_masks = [b[3] for b in batchs]
 
     features = torch.stack(features)
-    attention_mask = torch.stack(attention_mask)
+    feature_masks = torch.stack(feature_masks)
+    
+    # Pad label sequences to same length
+    label_input_ids = torch.nn.utils.rnn.pad_sequence(
+        label_input_ids, batch_first=True, padding_value=-100
+    )
+    label_attention_masks = torch.nn.utils.rnn.pad_sequence(
+        label_attention_masks, batch_first=True, padding_value=0
+    )
 
-    return features, attention_mask, captions
+    return features, feature_masks, label_input_ids, label_attention_masks
 
 def train_one_epoch(
         model,
@@ -36,14 +45,16 @@ def train_one_epoch(
             continue
 
         optimizer.zero_grad()
-        features, attention_mask, captions = data
+        features, feature_masks, label_input_ids, label_attention_masks = data
         features = features.to(device)
-        attention_mask = attention_mask.to(device)
+        feature_masks = feature_masks.to(device)
+        label_input_ids = label_input_ids.to(device)
+        label_attention_masks = label_attention_masks.to(device)
         video = {
             'video_features': features,
-            'attention_mask': attention_mask
+            'attention_mask': feature_masks
         }
-        out = model(video, captions)
+        out = model(video, label_input_ids, label_attention_masks)
         loss = out['loss']
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -68,14 +79,16 @@ def evaluate(model, tokenizer, val_loader):
             if data is None:
                 continue
 
-            features, attention_mask, captions = data
+            features, feature_masks, label_input_ids, label_attention_masks = data
             features = features.to(device)
-            attention_mask = attention_mask.to(device)
+            feature_masks = feature_masks.to(device)
+            label_input_ids = label_input_ids.to(device)
+            label_attention_masks = label_attention_masks.to(device)
             video = {
                 'video_features': features,
-                'attention_mask': attention_mask
+                'attention_mask': feature_masks
             }
-            outputs = model(video, captions)
+            outputs = model(video, label_input_ids, label_attention_masks)
             
             # với ViT + T5 model, loss được trả về là .loss
             loss = outputs['loss']

@@ -5,10 +5,11 @@ from model.utils.convert_to_dvc import convert_activitynet
 
 
 class VideoCaptionDataset(Dataset):
-    def __init__(self, data, feature_dir, max_len=300):
+    def __init__(self, data, feature_dir, max_len=300, tokenizer=None):
         self.data = data
         self.feature_dir = feature_dir
         self.max_len = max_len
+        self.tokenizer = tokenizer
 
     def __len__(self):
         return len(self.data)
@@ -34,6 +35,14 @@ class VideoCaptionDataset(Dataset):
 
         video_id = item["video_id"]
         caption = convert_activitynet(item)
+        # FIX: Tokenize once and extract only tensor components for better multiprocessing
+        tokenized = self.tokenizer(
+            caption,
+            padding=True,
+            truncation=True,
+            max_length=256,
+            return_tensors="pt"
+        )
 
         try:
             path = os.path.join(self.feature_dir, f"{video_id}.pt")
@@ -45,4 +54,8 @@ class VideoCaptionDataset(Dataset):
             print(f"Error {video_id}: {e}")
             return None
 
-        return feat, attention_mask, caption
+        # Return tensors instead of tokenized object for proper multiprocessing
+        label_input_ids = tokenized.input_ids.squeeze(0)  # Remove batch dim
+        label_attention_mask = tokenized.attention_mask.squeeze(0)  # Remove batch dim
+        
+        return feat, attention_mask, label_input_ids, label_attention_mask

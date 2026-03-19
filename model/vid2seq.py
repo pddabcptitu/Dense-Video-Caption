@@ -11,7 +11,7 @@ class Projection(nn.Module):
         self.proj = nn.Linear(in_dim, out_dim)
         self.norm = nn.LayerNorm(out_dim)
         self.drop = nn.Dropout(drop)
-        self.scale = nn.Parameter(torch.ones(1) * 0.1)
+        self.scale = nn.Parameter(torch.ones(1) * 1.0)
 
     def forward(self, x):
         x = self.proj(x)
@@ -70,7 +70,14 @@ class DenseVideoCaption(nn.Module):
             self._time_token_ids = torch.tensor(ids)
         return self._time_token_ids.to(device)
 
-    def forward(self, video_features, labels: str):
+    def forward(self, video_features, label_input_ids, label_attention_mask):
+        """Forward pass with pre-tokenized inputs.
+        
+        Args:
+            video_features: Dict with 'video_features' and 'attention_mask', or just tensor
+            label_input_ids: Pre-tokenized input IDs (B, T)
+            label_attention_mask: Attention mask for labels (B, T)
+        """
         if isinstance(video_features, dict):
             attention_mask = video_features['attention_mask']
             video_features = video_features['video_features']
@@ -87,15 +94,10 @@ class DenseVideoCaption(nn.Module):
                 device=visual_embeds.device
             )
 
-        tokenized = self.tokenizer(
-            labels,
-            padding=True,
-            truncation=True,
-            max_length=256,
-            return_tensors="pt"
-        )
-
-        input_ids = tokenized.input_ids.to(visual_embeds.device)
+        # FIX: Use pre-tokenized input_ids directly (no redundant tokenization)
+        input_ids = label_input_ids.to(visual_embeds.device)
+        # Ensure padding tokens are masked as -100 for loss calculation
+        input_ids = input_ids.clone()
         input_ids[input_ids == self.tokenizer.pad_token_id] = -100
 
         # Per-token loss để weight riêng time tokens
