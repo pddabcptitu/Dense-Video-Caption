@@ -11,7 +11,7 @@ class Projection(nn.Module):
         self.proj = nn.Linear(in_dim, out_dim)
         self.norm = nn.LayerNorm(out_dim)
         self.drop = nn.Dropout(drop)
-        self.scale = nn.Parameter(torch.ones(1) * 1.0)
+        self.scale = nn.Parameter(torch.ones(1, dtype=torch.float32))
 
     def forward(self, x):
         x = self.proj(x)
@@ -33,7 +33,6 @@ class DenseVideoCaption(nn.Module):
                  num_bins=100):
         super().__init__()
 
-        # FIX 1: lưu num_bins để dùng trong forward()
         self.num_bins = num_bins
 
         self.visual_encoder = VisionTransformer(
@@ -58,7 +57,6 @@ class DenseVideoCaption(nn.Module):
             drop=dec_drop
         )
 
-        # Cache time token ids — tránh tính lại mỗi forward pass
         self._time_token_ids = None
 
     def _get_time_token_ids(self, device):
@@ -71,13 +69,6 @@ class DenseVideoCaption(nn.Module):
         return self._time_token_ids.to(device)
 
     def forward(self, video_features, label_input_ids, label_attention_mask):
-        """Forward pass with pre-tokenized inputs.
-        
-        Args:
-            video_features: Dict with 'video_features' and 'attention_mask', or just tensor
-            label_input_ids: Pre-tokenized input IDs (B, T)
-            label_attention_mask: Attention mask for labels (B, T)
-        """
         if isinstance(video_features, dict):
             attention_mask = video_features['attention_mask']
             video_features = video_features['video_features']
@@ -94,13 +85,16 @@ class DenseVideoCaption(nn.Module):
                 device=visual_embeds.device
             )
 
-        # FIX: Use pre-tokenized input_ids directly (no redundant tokenization)
-        input_ids = label_input_ids.to(visual_embeds.device)
-        # Ensure padding tokens are masked as -100 for loss calculation
-        input_ids = input_ids.clone()
+        input_ids = label_input_ids.to(visual_embeds.device).clone()
+
+        # Tính time token mask TRƯỚC khi replace pad → -100
+        time_token_ids = self._get_time_token_ids(input_ids.device)
+        is_time_token = torch.isin(input_ids, time_token_ids)
+
+        # Sau đó mới mask padding
         input_ids[input_ids == self.tokenizer.pad_token_id] = -100
 
-        # Per-token loss để weight riêng time tokens
+        # T5 tự _shift_right bên trong khi dùng labels=
         logits = self.t5_model(
             inputs_embeds=visual_embeds,
             attention_mask=attention_mask,
@@ -114,19 +108,11 @@ class DenseVideoCaption(nn.Module):
             ignore_index=-100
         ).view(input_ids.shape)  # (B, T)
 
-        # Time token weight 2.0: ép model học timestamp tốt hơn
-        time_token_ids = self._get_time_token_ids(input_ids.device)
-        is_time_token = torch.isin(input_ids, time_token_ids)
-        
-        # Create weight tensor on proper device with gradient tracking
         weight = torch.ones_like(input_ids, dtype=torch.float32)
         weight[is_time_token] = 2.0
 
-        # Only keep loss for valid tokens (not -100)
         valid = (input_ids != -100).float()
-        weighted_loss = (per_token_loss * weight * valid).sum()
-        num_valid = valid.sum().clamp(min=1e-8)  # Avoid division by zero
-        loss = weighted_loss / num_valid
+        loss = (per_token_loss * weight * valid).sum() / valid.sum().clamp(min=1e-8)
 
         return {"loss": loss}
 
@@ -134,7 +120,6 @@ class DenseVideoCaption(nn.Module):
     def generate(self, video_features, max_length=200, num_beams=5):
         self.eval()
 
-        # FIX 2: handle dict input (batch có padding)
         if isinstance(video_features, dict):
             attention_mask = video_features['attention_mask']
             video_features = video_features['video_features']
@@ -162,13 +147,11 @@ class DenseVideoCaption(nn.Module):
             length_penalty=0.8,
         )
 
-        # FIX 3: skip_special_tokens=False để giữ <times=N> trong output
         captions = self.tokenizer.batch_decode(
             outputs,
             skip_special_tokens=False
         )
 
-        # Chỉ xóa padding token, giữ lại time tokens
         pad_token = self.tokenizer.pad_token
         captions = [c.replace(pad_token, '').strip() for c in captions]
 

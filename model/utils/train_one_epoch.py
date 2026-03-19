@@ -56,6 +56,7 @@ def train_one_epoch(
         }
         out = model(video, label_input_ids, label_attention_masks)
         loss = out['loss']
+        loss = loss.mean()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
@@ -92,6 +93,7 @@ def evaluate(model, tokenizer, val_loader):
             
             # với ViT + T5 model, loss được trả về là .loss
             loss = outputs['loss']
+            
             total_loss += loss.item()
             n_batches += 1
 
