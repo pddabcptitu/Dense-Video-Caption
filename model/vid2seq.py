@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from model.vit import VisionTransformer
 from model import t5
+from transformers.modeling_outputs import BaseModelOutput
 
 
 class Projection(nn.Module):
@@ -85,12 +86,17 @@ class DenseVideoCation(nn.Module):
         input_ids = tokenized.input_ids.to(visual_embeds.device)
 
         input_ids[input_ids == self.tokenizer.pad_token_id] = -100
-
+        
+        encoder_outputs = BaseModelOutput(
+            last_hidden_state=visual_embeds
+        )
+        
         outputs = self.t5_model(
-            inputs_embeds=visual_embeds,
+            encoder_outputs=encoder_outputs,
             attention_mask=attention_mask,
             labels=input_ids
         )
+
         loss = outputs.loss
 
         return {"loss": loss}
@@ -112,9 +118,12 @@ class DenseVideoCation(nn.Module):
             device=visual_embeds.device
         )
 
-        # 4. Generate text
+        encoder_outputs = BaseModelOutput(
+            last_hidden_state=visual_embeds
+        )
+        
         outputs = self.t5_model.generate(
-            inputs_embeds=visual_embeds,
+            encoder_outputs=encoder_outputs,
             attention_mask=attention_mask,
             max_length=max_length,
             num_beams=num_beams,
