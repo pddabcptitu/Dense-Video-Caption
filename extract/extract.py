@@ -22,14 +22,14 @@ def extract_and_save(
     if is_local:
         exists_paths = set(os.listdir(save_dir))
     else:
-        exists_paths = set(CURD_driver.list_all_files_with_id('1lF_AiDorN7UpDE-W5_DHDUg4EX9sT4SO').keys())
+        exists_paths = set(CURD_driver.list_all_files_with_id('1P2uvDJj9Jli7FMxrYpsa6hgYrv5eGxGW').keys())
 
     if is_local:
         end = min(end, len(video_paths))
         video_paths = video_paths[start:end]
         video_paths = [
             path for path in video_paths
-            if os.path.splitext(os.path.basename(path))[0] + '.pt' not in exists_paths and not os.path.splitext(video_path)[-1] == '.webm'
+            if os.path.splitext(os.path.basename(path))[0] + '.pt' not in exists_paths and not os.path.splitext(path)[-1] == '.webm'
         ]
     else:
         video_paths = CURD_driver.list_all_files_with_id('14yuk3BTCVgqsWJPSpaxMDu2Lmv7LpjjS')
@@ -76,7 +76,7 @@ def extract_and_save(
             torch.save(features.cpu(), save_path)
 
             if not is_local:
-                CURD_driver.upload_file(save_path, '1lF_AiDorN7UpDE-W5_DHDUg4EX9sT4SO')
+                CURD_driver.upload_file(save_path, '1P2uvDJj9Jli7FMxrYpsa6hgYrv5eGxGW')
                 os.remove(save_path)
 
         except Exception as e:
