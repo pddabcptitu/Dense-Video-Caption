@@ -21,6 +21,8 @@ class VideoExtract:
         if frames is None or len(frames) == 0:
             return None
 
+        if isinstance(frames, torch.Tensor):
+            frames = frames.cpu().numpy() 
         frames = torch.stack([
             self.preprocess(Image.fromarray(frame)) for frame in frames
         ])
