@@ -1,5 +1,5 @@
 from decord import VideoReader, cpu
-import numpy
+import numpy as np
 
 def get_frames(video_path, target_fps=2, size=(224, 224)):
     try:
