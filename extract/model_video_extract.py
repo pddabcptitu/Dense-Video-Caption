@@ -21,16 +21,10 @@ class VideoExtract:
         if frames is None or len(frames) == 0:
             return None
 
-        if not isinstance(frames, torch.Tensor):
-            frames = torch.stack([
-                self.preprocess(Image.fromarray(frame)) for frame in frames
-            ])
-        else:
-            normalize = transforms.Normalize(
-                mean=(0.48145466, 0.4578275, 0.40821073),
-                std=(0.26862954, 0.26130258, 0.27577711)
-            )
-            frames = torch.stack([normalize(f) for f in frames])
+        frames = torch.stack([
+            self.preprocess(Image.fromarray(frame)) for frame in frames
+        ])
+
 
         num_frame = len(frames)
         features = []
@@ -39,7 +33,6 @@ class VideoExtract:
             batch = frames[i:i+self.batch_size].to(self.device).float()
 
             batch_features = self.model.encode_image(batch)
-            batch_features = batch_features / batch_features.norm(dim=-1, keepdim=True)
 
             features.append(batch_features.cpu())
 
