@@ -67,8 +67,8 @@ def upload_file(file_path, folder_id=None):
         fields='id'
     ).execute()
 
-    print("✅ Uploaded:", file_name)
-    print("📁 File ID:", file.get('id'))
+    # print("✅ Uploaded:", file_name)
+    # print("📁 File ID:", file.get('id'))
     return file.get('id')
 
 # ========================
@@ -110,9 +110,9 @@ def download_file(file_id, save_path):
     done = False
     while not done:
         status, done = downloader.next_chunk()
-        print(f"Downloading: {int(status.progress() * 100)}%")
+        # print(f"Downloading: {int(status.progress() * 100)}%")
 
-    print("✅ Download completed:", save_path)
+    # print("✅ Download completed:", save_path)
 
 # ========================
 # DELETE FILE

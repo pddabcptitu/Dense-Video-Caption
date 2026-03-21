@@ -14,6 +14,8 @@ def extract_and_save(
     size=(224, 224),
     save_dir='features_output',
     target_fps=2,
+    start=0,
+    end=-1,
     is_local=True
 ):
     os.makedirs(save_dir, exist_ok=True)
@@ -23,16 +25,21 @@ def extract_and_save(
         exists_paths = set(CURD_driver.list_all_files_with_id('1lF_AiDorN7UpDE-W5_DHDUg4EX9sT4SO').keys())
 
     if is_local:
+        end = min(end, len(video_paths))
+        video_paths = video_paths[start:end]
         video_paths = [
             path for path in video_paths
-            if os.path.splitext(os.path.basename(path))[0] + '.pt' not in exists_paths
+            if os.path.splitext(os.path.basename(path))[0] + '.pt' not in exists_paths and not os.path.splitext(video_path)[-1] == '.webm'
         ]
     else:
         video_paths = CURD_driver.list_all_files_with_id('14yuk3BTCVgqsWJPSpaxMDu2Lmv7LpjjS')
+        tmp_paths = list(video_paths.keys())
+        end = min(end, len(tmp_paths))
+        tmp_paths = tmp_paths[start:end]
         video_paths = {
             video_path: video_paths[video_path]
-            for video_path in video_paths
-            if os.path.splitext(video_path)[0] + '.pt' not in exists_paths
+            for video_path in tmp_paths
+            if os.path.splitext(video_path)[0] + '.pt' not in exists_paths and not os.path.splitext(video_path)[-1] == '.webm'
         }
 
     loader = VideoLoader(video_paths, fps=target_fps, is_local=is_local)
@@ -41,7 +48,7 @@ def extract_and_save(
         if len(batch) == 0:
             return None
         return torch.utils.data.dataloader.default_collate(batch)
-    dataloader = DataLoader(loader, batch_size=1, shuffle=False, collate_fn=collate_fn)
+    dataloader = DataLoader(loader, batch_size=1, shuffle=False, collate_fn=collate_fn, num_workers=4, pin_memory=True)
 
     extractor = VideoExtract(
         model_name=model_name,
@@ -88,7 +95,7 @@ def extract(
 ):
 
     loader = VideoLoader(video_paths, fps=target_fps)
-    dataloader = DataLoader(loader, batch_size=1, shuffle=False)
+    dataloader = DataLoader(loader, batch_size=1, shuffle=False, num_workers=4, pin_memory=True  )
 
     extractor = VideoExtract(
         model_name=model_name,
