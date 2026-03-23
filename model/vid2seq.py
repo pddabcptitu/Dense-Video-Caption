@@ -1,158 +1,146 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model.vit import VisionTransformer
-from model import t5
+from transformers import T5ForConditionalGeneration
+from transformers.modeling_outputs import BaseModelOutput
+from models.vit import VisionTransformer
 
-
-class Projection(nn.Module):
-    def __init__(self, in_dim, out_dim, drop=0.1):
+# ═══════════════════════════════════════════════════════════════
+# Vid2Seq model
+# ═══════════════════════════════════════════════════════════════
+class Vid2Seq(nn.Module):
+    def __init__(self, t5_path, num_features=100, embed_dim=768, depth=12,
+                 heads=12, mlp_dim=2048, vis_drop=0., tokenizer=None, num_bins=100,
+                 contrastive_dim=256, contrastive_weight=0.1):
         super().__init__()
-        self.proj = nn.Linear(in_dim, out_dim)
-        self.norm = nn.LayerNorm(out_dim)
-        self.drop = nn.Dropout(drop)
-        self.scale = nn.Parameter(torch.ones(1, dtype=torch.float32))
+        self.t5 = T5ForConditionalGeneration.from_pretrained(t5_path)
+        self.t5.resize_token_embeddings(len(tokenizer) - num_bins)
+        self.t5.resize_token_embeddings(len(tokenizer))
 
-    def forward(self, x):
-        x = self.proj(x)
-        x = self.norm(x)
-        x = self.drop(x)
-        return x * self.scale
-
-
-class DenseVideoCaption(nn.Module):
-    def __init__(self,
-                 t5_path,
-                 num_features=100,
-                 embed_dim=768,
-                 depth=12,
-                 heads=12,
-                 mlp_dim=2048,
-                 vis_drop=0.,
-                 dec_drop=0.1,
-                 num_bins=100):
-        super().__init__()
-
-        self.num_bins = num_bins
+        # Freeze T5 encoder — only decoder + visual encoder learn
+        for param in self.t5.encoder.parameters():
+            param.requires_grad = False
 
         self.visual_encoder = VisionTransformer(
-            num_features=num_features,
-            embed_dim=embed_dim,
-            depth=depth,
-            num_heads=heads,
-            mlp_dim=mlp_dim,
-            qkv_bias=True,
-            qk_scale=None,
-            drop_rate=vis_drop,
-            attn_drop_rate=vis_drop,
-            norm_layer=nn.LayerNorm
+            num_features=num_features, embed_dim=embed_dim, depth=depth,
+            num_heads=heads, mlp_dim=mlp_dim, qkv_bias=True, qk_scale=None,
+            drop_rate=vis_drop, attn_drop_rate=vis_drop, norm_layer=nn.LayerNorm,
+        )
+        d_model = self.t5.config.d_model
+        self.proj_v2t = (
+            nn.Linear(embed_dim, d_model)
+            if d_model != embed_dim else None
+        )
+        self.tokenizer = tokenizer
+
+        # ── Contrastive heads ──────────────────────────────────────────────
+        # Project video mean-pooled features → contrastive space
+        self.video_proj = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, contrastive_dim),
+        )
+        # Project T5 decoder hidden-state mean → contrastive space
+        # T5 decoder output dim == d_model
+        self.text_proj = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, contrastive_dim),
+        )
+        # Learnable temperature for InfoNCE
+        self.logit_scale = nn.Parameter(torch.ones([]) * 2.659)  # ln(14) ≈ 2.659
+        self.contrastive_weight = contrastive_weight
+
+    # ─────────────────────────────────────────────
+    def _encode_video(self, video):
+        video    = self.visual_encoder(video)           # (B, T, embed_dim)
+        if self.proj_v2t is not None:
+            video = self.proj_v2t(video)               # (B, T, d_model)
+        atts_vis = torch.ones(video.shape[:2], dtype=torch.long, device=video.device)
+        return BaseModelOutput(last_hidden_state=video), atts_vis
+
+    # ─────────────────────────────────────────────
+    @staticmethod
+    def _info_nce(video_emb, text_emb, logit_scale):
+        """
+        Symmetric InfoNCE (CLIP-style) contrastive loss.
+
+        Args:
+            video_emb : (B, D) L2-normalised video embeddings
+            text_emb  : (B, D) L2-normalised text embeddings
+            logit_scale: scalar temperature parameter
+
+        Returns:
+            scalar loss
+        """
+        # Clamp temperature to avoid numerical explosion
+        scale  = logit_scale.exp().clamp(max=100.0)
+        logits = scale * video_emb @ text_emb.t()           # (B, B)
+        labels = torch.arange(logits.size(0), device=logits.device)
+        loss_v = F.cross_entropy(logits,   labels)          # video → text
+        loss_t = F.cross_entropy(logits.t(), labels)        # text  → video
+        return (loss_v + loss_t) / 2.0
+
+    # ─────────────────────────────────────────────
+    def forward(self, video, output_tokenized):
+        encoded, atts_vis = self._encode_video(video)
+
+        targets = output_tokenized["input_ids"].masked_fill(
+            output_tokenized["input_ids"] == self.tokenizer.pad_token_id, -100
         )
 
-        self.tokenizer = t5.load_tokenizer(t5_path, num_bins=num_bins)
-        self.t5_model = t5.load_model(self.tokenizer, t5_path)
-
-        self.projection = Projection(
-            in_dim=embed_dim,
-            out_dim=self.t5_model.config.d_model,
-            drop=dec_drop
+        # T5 forward — encoder_outputs bypasses frozen T5 encoder
+        out = self.t5(
+            encoder_outputs=encoded,
+            attention_mask=atts_vis,
+            decoder_attention_mask=output_tokenized["attention_mask"],
+            labels=targets,
+            return_dict=True,
+            output_hidden_states=True,          # need decoder hidden states
         )
+        caption_loss = out.loss
 
-        self._time_token_ids = None
+        # ── Contrastive loss ────────────────────────────────────────────
+        # video_emb: mean-pool over temporal dim of visual encoder output
+        video_emb = encoded.last_hidden_state.mean(dim=1)   # (B, d_model)
+        video_emb = self.video_proj(video_emb)              # (B, contrastive_dim)
+        video_emb = F.normalize(video_emb, dim=-1)
 
-    def _get_time_token_ids(self, device):
-        if self._time_token_ids is None:
-            ids = [
-                self.tokenizer.convert_tokens_to_ids(f"<times={i}>")
-                for i in range(self.num_bins)
-            ]
-            self._time_token_ids = torch.tensor(ids)
-        return self._time_token_ids.to(device)
+        # text_emb: mean-pool over sequence dim of last decoder hidden state
+        # decoder_hidden_states[-1] shape: (B, seq_len, d_model)
+        dec_hidden = out.decoder_hidden_states[-1]          # (B, seq_len, d_model)
+        # Mask out padding tokens before mean-pooling
+        pad_mask   = output_tokenized["attention_mask"].unsqueeze(-1).float()  # (B, seq, 1)
+        text_emb   = (dec_hidden * pad_mask).sum(dim=1) / pad_mask.sum(dim=1).clamp(min=1e-6)
+        text_emb   = self.text_proj(text_emb)               # (B, contrastive_dim)
+        text_emb   = F.normalize(text_emb, dim=-1)
 
-    def forward(self, video_features, label_input_ids, label_attention_mask):
-        if isinstance(video_features, dict):
-            attention_mask = video_features['attention_mask']
-            video_features = video_features['video_features']
-        else:
-            attention_mask = None
+        contrastive_loss = self._info_nce(video_emb, text_emb, self.logit_scale)
 
-        visual_embeds = self.visual_encoder(video_features)
-        visual_embeds = self.projection(visual_embeds)
+        total_loss = caption_loss + self.contrastive_weight * contrastive_loss
 
-        if attention_mask is None:
-            attention_mask = torch.ones(
-                visual_embeds.size()[:-1],
-                dtype=torch.long,
-                device=visual_embeds.device
-            )
-
-        input_ids = label_input_ids.to(visual_embeds.device).clone()
-
-        # Tính time token mask TRƯỚC khi replace pad → -100
-        time_token_ids = self._get_time_token_ids(input_ids.device)
-        is_time_token = torch.isin(input_ids, time_token_ids)
-
-        # Sau đó mới mask padding
-        input_ids[input_ids == self.tokenizer.pad_token_id] = -100
-
-        # T5 tự _shift_right bên trong khi dùng labels=
-        logits = self.t5_model(
-            inputs_embeds=visual_embeds,
-            attention_mask=attention_mask,
-            labels=input_ids
-        ).logits  # (B, T, vocab)
-
-        per_token_loss = F.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            input_ids.view(-1),
-            reduction='none',
-            ignore_index=-100
-        ).view(input_ids.shape)  # (B, T)
-
-        weight = torch.ones_like(input_ids, dtype=torch.float32)
-        weight[is_time_token] = 2.0
-
-        valid = (input_ids != -100).float()
-        loss = (per_token_loss * weight * valid).sum() / valid.sum().clamp(min=1e-8)
-
-        return {"loss": loss}
+        return {
+            "loss":             total_loss,
+            "caption_loss":     caption_loss,
+            "contrastive_loss": contrastive_loss,
+        }
 
     @torch.no_grad()
-    def generate(self, video_features, max_length=200, num_beams=5):
-        self.eval()
-
-        if isinstance(video_features, dict):
-            attention_mask = video_features['attention_mask']
-            video_features = video_features['video_features']
-        else:
-            attention_mask = None
-
-        visual_embeds = self.visual_encoder(video_features)
-        visual_embeds = self.projection(visual_embeds)
-
-        if attention_mask is None:
-            attention_mask = torch.ones(
-                visual_embeds.size()[:-1],
-                dtype=torch.long,
-                device=visual_embeds.device
-            )
-
-        outputs = self.t5_model.generate(
-            inputs_embeds=visual_embeds,
-            attention_mask=attention_mask,
-            max_length=max_length,
+    def generate(self, video, num_beams=4, max_length=256, min_length=1,
+                 use_nucleus_sampling=False, top_p=0.9, repetition_penalty=1.0,
+                 length_penalty=1.0, num_captions=1, temperature=1.0):
+        encoded, atts_vis = self._encode_video(video)
+        ids = self.t5.generate(
+            encoder_outputs=encoded,
+            attention_mask=atts_vis,
+            do_sample=use_nucleus_sampling,
+            top_p=top_p,
+            temperature=temperature,
             num_beams=num_beams,
-            early_stopping=True,
-            no_repeat_ngram_size=3,
-            repetition_penalty=1.3,
-            length_penalty=0.8,
+            max_new_tokens=max_length,
+            min_length=min_length,
+            repetition_penalty=repetition_penalty,
+            length_penalty=length_penalty,
+            num_return_sequences=num_captions,
         )
-
-        captions = self.tokenizer.batch_decode(
-            outputs,
-            skip_special_tokens=False
-        )
-
-        pad_token = self.tokenizer.pad_token
-        captions = [c.replace(pad_token, '').strip() for c in captions]
-
-        return captions
+        return self.tokenizer.batch_decode(ids, skip_special_tokens=False)
