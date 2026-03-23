@@ -40,19 +40,22 @@ def load_video_feature(path, max_feats):
 # ═══════════════════════════════════════════════════════════════
 def infer(model, tokenizer, video, device, max_length=256):
     model.eval()
-
     video = video.unsqueeze(0).to(device)
 
     with torch.no_grad():
-        output_ids = model.generate(
+        output = model.generate(
             video=video,
             max_length=max_length,
             num_beams=4,
-            do_sample=False,
-            repetition_penalty=1.2,
+            repetition_penalty=1.9,
         )
 
-    pred = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+    # 🔥 FIX QUAN TRỌNG
+    if isinstance(output, list):
+        pred = output[0]   # đã là string rồi
+    else:
+        pred = tokenizer.decode(output[0], skip_special_tokens=True)
+
     return pred
 
 
