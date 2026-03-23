@@ -4,23 +4,8 @@ import random
 import torch
 from torch.utils.data import Dataset
 from model.dataset.augment import temporal_speed_jitter, boundary_emphasis, temporal_feature_dropout, gaussian_feature_noise, temporal_crop
-# ═══════════════════════════════════════════════════════════════
-# Dataset
-# ═══════════════════════════════════════════════════════════════
-class Vid2SeqDataset(Dataset):
-    """
-    JSON format:
-    [
-      {
-        "video_id"   : "v_xxx",
-        "duration"   : 82.73,
-        "sentences"  : ["...", "..."],
-        "timestamps" : [[s, e], [s, e]]
-      }, ...
-    ]
-    Feature files: {feature_dir}/{video_id}.pt  → Tensor (T, 768) or (1, T, 768)
-    """
 
+class Vid2SeqDataset(Dataset):
     def __init__(self, data_path, tokenizer, feature_dir,
                  max_output_tokens=256, num_bins=100, max_feats=100,
                  augment=False,
@@ -79,16 +64,11 @@ class Vid2SeqDataset(Dataset):
         return f"<time={min(tok, self.num_bins - 1)}>"
 
     def _build_target(self, sentences, timestamps, duration):
-        """
-        FIX: no space between the two time tokens.
-        Format: "<time=X><time=Y> sentence <time=A><time=B> sentence ..."
-        Must match decode_prediction pattern: r"<time=(\d+)><time=(\d+)>\s*([^<]+)"
-        """
         parts = []
         for s, (t0, t1) in zip(sentences, timestamps):
             s_tok = self._time_tok(t0, duration)
             e_tok = self._time_tok(t1, duration)
-            parts.append(f"{s_tok}{e_tok} {s}")   # ← FIX: no space between tokens
+            parts.append(f"{s_tok}{e_tok} {s}")
         return " ".join(parts)
 
     def __getitem__(self, idx):

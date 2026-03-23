@@ -1,9 +1,6 @@
 import torch
 import random
 
-# ═══════════════════════════════════════════════════════════════
-# Augmentation utilities
-# ═══════════════════════════════════════════════════════════════
 def temporal_speed_jitter(video, timestamps, duration, speed_range=(0.8, 1.2)):
     T, D   = video.shape
     speed  = random.uniform(*speed_range)

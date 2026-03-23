@@ -14,7 +14,6 @@ from tqdm import tqdm
 
 from transformers import get_cosine_schedule_with_warmup
 
-# ===== Import từ project =====
 from model.dataset.dataset import Vid2SeqDataset, collate_fn
 from model.vid2seq import Vid2Seq
 from model.utils.checkpoint import load_checkpoint, save_checkpoint
@@ -23,9 +22,6 @@ from model.utils.train_one_epoch import train_one_epoch
 from model.utils.evaluate import evaluate
 
 
-# ═══════════════════════════════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════════════════════════════
 def main():
     parser = argparse.ArgumentParser()
 
@@ -51,7 +47,6 @@ def main():
     parser.add_argument("--seed",              type=int,   default=42)
     parser.add_argument("--num_workers",       type=int,   default=2)
 
-    # Augmentation flags
     parser.add_argument("--no_augment",            action="store_true")
     parser.add_argument("--no_speed_jitter",       action="store_true")
     parser.add_argument("--no_temporal_crop",      action="store_true")
@@ -61,7 +56,6 @@ def main():
 
     args = parser.parse_args()
 
-    # ── Seed ──
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
@@ -69,9 +63,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    # ─────────────────────────────────────────────
-    # Model
-    # ─────────────────────────────────────────────
+    
     print("\n[1] Building model...")
     tokenizer = get_tokenizer(args.t5_path, num_bins=args.num_bins)
 
@@ -94,9 +86,6 @@ def main():
     else:
         print(f"Using 1 GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
 
-    # ─────────────────────────────────────────────
-    # Dataset
-    # ─────────────────────────────────────────────
     augment = not args.no_augment
     print(f"\n[2] Loading datasets... (augmentation={'ON' if augment else 'OFF'})")
 
@@ -137,9 +126,6 @@ def main():
 
     print(f"Train: {len(train_ds)} | Test: {len(test_ds)}")
 
-    # ─────────────────────────────────────────────
-    # Optimizer + Scheduler
-    # ─────────────────────────────────────────────
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.lr,
@@ -157,9 +143,6 @@ def main():
         num_training_steps=total_steps,
     )
 
-    # ─────────────────────────────────────────────
-    # Training loop + Early stopping
-    # ─────────────────────────────────────────────
     print("\n[3] Training...")
 
     best_loss = float("inf")
@@ -195,8 +178,5 @@ def main():
                 break
 
 
-# ═══════════════════════════════════════════════════════════════
-# RUN
-# ═══════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     main()
