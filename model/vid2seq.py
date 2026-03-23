@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import T5ForConditionalGeneration
 from transformers.modeling_outputs import BaseModelOutput
-from models.vit import VisionTransformer
+from model.vit import VisionTransformer
 
 # ═══════════════════════════════════════════════════════════════
 # Vid2Seq model

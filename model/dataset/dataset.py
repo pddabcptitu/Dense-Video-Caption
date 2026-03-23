@@ -3,7 +3,7 @@ import json
 import random
 import torch
 from torch.utils.data import Dataset
-from augment import temporal_speed_jitter, boundary_emphasis, temporal_feature_dropout, gaussian_feature_noise, temporal_crop
+from model.dataset.augment import temporal_speed_jitter, boundary_emphasis, temporal_feature_dropout, gaussian_feature_noise, temporal_crop
 # ═══════════════════════════════════════════════════════════════
 # Dataset
 # ═══════════════════════════════════════════════════════════════
