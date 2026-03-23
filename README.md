@@ -65,7 +65,7 @@ pip install numpy tqdm Pillow
 
 ### 1. Định dạng JSON
 
-Dữ liệu training phải là file JSON với cấu trúc sau:
+Cần chuẩn bị **2 file JSON**: `train.json` và `test.json` với cấu trúc:
 
 ```json
 [
@@ -89,16 +89,15 @@ Dữ liệu training phải là file JSON với cấu trúc sau:
 **Giải thích các trường:**
 - `video_id`: Mã định danh video (duy nhất)
 - `feature`: Tên file đặc trưng (`*.pt`)
-- `duration`: Độ dài video (seconds)
+- `duration`: Độ dài video (giây)
 - `sentences`: Danh sách các mô tả (caption)
 - `timestamps`: Danh sách thời gian [t_start, t_end] ứng với mỗi caption
 
 ### 2. Đặc trưng Video (Feature Files)
 
-Các file đặc trưng phải được lưu dưới dạng PyTorch tensor (`.pt`):
+Các file đặc trưng phải được lưu dưới dạng PyTorch tensor (`.pt`) trong `--feature_dir`:
 
 ```python
-# Ví dụ tạo feature file
 import torch
 
 # Feature shape: (T, D) hoặc (1, T, D)
@@ -107,68 +106,147 @@ video_feature = torch.randn(100, 768)  # 100 frames, 768-dim embedding
 torch.save(video_feature, "video_001.pt")
 ```
 
-**Cấu hình mặc định:**
-- `max_feats`: 100 (số frames tối đa, sẽ interpolate)
-- Embedding dimension: Tuỳ model (thường 768 hoặc 2048)
+**Lưu ý quan trọng:**
+- **Trainer default**: `max_feats=100` (interpolate frames → 100)
+- **Infer default**: `max_feats=225` (interpolate frames → 225) ⚠️
+- Khi inference, phải match `max_feats` với checkpoint training!
+- Nếu training dùng 100 frames, infer cũng phải dùng `--max_feats 100`
 
 ---
 
 ## Cấu hình và training
 
-### Xem các tham số cấu hình
+### Tham số cấu hình (trainer.py)
 
-Mở file **trainer.py**, các tham số chính bao gồm:
-- `batch_size`: Kích thước batch (mặc định 16)
-- `num_epochs`: Số epoch training
-- `learning_rate`: Tốc độ học
-- `max_output_tokens`: Độ dài tối đa caption (mặc định 256)
+| Tham số | Loại | Mặc định | Mô tả |
+|---------|------|----------|-------|
+| `--train_data` | str | **Required** | Đường dẫn file train.json |
+| `--test_data` | str | **Required** | Đường dẫn file test.json |
+| `--feature_dir` | str | **Required** | Thư mục chứa features (.pt) |
+| `--checkpoint` | str | **Required** | Checkpoint ban đầu |
+| `--output_dir` | str | `checkpoints` | Thư mục lưu checkpoint |
+| `--t5_path` | str | `t5-base` | Mô hình T5 base |
+| `--epochs` | int | 30 | Số epoch training |
+| `--batch_size` | int | 4 | Kích thước batch |
+| `--lr` | float | 3e-5 | Learning rate |
+| `--warmup_ratio` | float | 0.1 | Warmup ratio (10% tổng steps) |
+| `--patience` | int | 5 | Early stopping patience |
+| `--max_feats` | int | 100 | Số frames interpolate |
+| `--num_bins` | int | 100 | Số time bins |
+| `--max_output_tokens` | int | 256 | Độ dài tối đa caption |
+| `--seed` | int | 42 | Random seed |
+| `--num_workers` | int | 2 | Số worker DataLoader |
+| `--contrastive_weight` | float | 0.1 | Trọng số contrastive loss |
 
 ### Chạy training
 
+**Ví dụ đầy đủ:**
 ```bash
 python trainer.py \
-    --data_path path/to/train.json \
-    --feature_dir path/to/features \
-    --output_dir ./outputs \
-    --batch_size 16 \
-    --num_epochs 10 \
-    --learning_rate 1e-4
+    --train_data data/train.json \
+    --test_data data/test.json \
+    --feature_dir data/features \
+    --checkpoint checkpoints/initial.pth \
+    --output_dir checkpoints \
+    --epochs 30 \
+    --batch_size 4 \
+    --lr 3e-5
 ```
 
-**Hoặc mặc định (chỉnh trong code):**
+**Ví dụ tối thiểu (dùng default):**
 ```bash
-python trainer.py
+python trainer.py \
+    --train_data data/train.json \
+    --test_data data/test.json \
+    --feature_dir data/features \
+    --checkpoint checkpoints/initial.pth
 ```
 
-### Augmentation
+### Augmentation flags
 
-Dataset hỗ trợ các kỹ thuật augmentation (activate trong `dataset.py`):
-- `temporal_speed_jitter`: Thay đổi tốc độ phát
-- `temporal_crop`: Cắt đoạn video ngẫu nhiên
-- `gaussian_feature_noise`: Thêm nhiễu Gaussian vào feature
-- `temporal_feature_dropout`: Dropout theo thời gian
-- `boundary_emphasis`: Nhấn mạnh biên giới event
+Tất cả augmentation được bật mặc định. Dùng flag `--no_*` để tắt:
+
+```bash
+# Tắt tất cả augmentation
+python trainer.py \
+    --train_data ... \
+    --test_data ... \
+    --feature_dir ... \
+    --checkpoint ... \
+    --no_augment
+
+# Tắt riêng một số kỹ thuật
+python trainer.py \
+    ... \
+    --no_speed_jitter \
+    --no_temporal_crop \
+    --no_gaussian_noise \
+    --no_feature_dropout \
+    --no_boundary_emphasis
+```
+
+**Các kỹ thuật augmentation:**
+- `--no_speed_jitter`: Tắt thay đổi tốc độ phát
+- `--no_temporal_crop`: Tắt cắt đoạn video ngẫu nhiên
+- `--no_gaussian_noise`: Tắt thêm nhiễu Gaussian
+- `--no_feature_dropout`: Tắt dropout theo thời gian
+- `--no_boundary_emphasis`: Tắt nhấn mạnh biên giới event
 
 ---
 
 ## Chạy Inference (Test)
 
-### Test trên một video
+### Tham số cấu hình (infer.py)
+
+| Tham số | Loại | Mặc định | Mô tả |
+|---------|------|----------|-------|
+| `--feature_path` | str | **Required** | Đường dẫn file feature (.pt) |
+| `--duration` | float | **Required** | Độ dài video (giây) |
+| `--checkpoint` | str | **Required** | Checkpoint model |
+| `--t5_path` | str | `t5-base` | Mô hình T5 base |
+| `--max_feats` | int | 225 | Số frames tối đa ⚠️ |
+| `--num_bins` | int | 100 | Số time bins |
+
+⚠️ **Chú ý**: `max_feats` mặc định trong infer là **225**, khác với trainer (100). Phải match với checkpoint!
+
+### Chạy inference trên một video
 
 ```bash
 python infer.py \
-    --checkpoint path/to/checkpoint.pth \
-    --feature_dir path/to/features \
-    --video_id video_001
+    --feature_path data/features/video_001.pt \
+    --duration 120.5 \
+    --checkpoint checkpoints/best.pth
 ```
 
-### Đầu ra dự kiến
+### Chạy với tham số tuỳ chỉnh
+
+```bash
+python infer.py \
+    --feature_path data/features/video_001.pt \
+    --duration 120.5 \
+    --checkpoint checkpoints/best.pth \
+    --t5_path t5-base \
+    --max_feats 100 \
+    --num_bins 100
+```
+
+### Đầu ra
 
 ```
-Video ID: video_001
-Generated captions:
-  [5.2 - 15.3] Người ăn bánh mỳ
-  [20.1 - 35.8] Cô gái uống nước
+Device: cuda
+
+[1] Loading model...
+[2] Loading video feature...
+[3] Generating caption...
+
+Raw prediction:
+<time=5><time=15> Người ăn bánh mỳ <time=20><time=35> Cô gái uống nước
+
+[4] Decoding timestamps...
+
+Final results:
+{'caption': 'Người ăn bánh mỳ', 'starts': 5.2, 'ends': 15.3}
+{'caption': 'Cô gái uống nước', 'starts': 20.1, 'ends': 35.8}
 ```
 
 ---
@@ -200,37 +278,33 @@ Generated captions:
 
 ### Lỗi: "Missing .pt files"
 - **Nguyên nhân**: File feature không tồn tại hoặc tên không khớp
-- **Giải pháp**: Kiểm tra `feature_dir`, đảm bảo tên file trùng với `item["feature"]` hoặc `item["video_id"] + ".pt"`
+- **Giải pháp**: Kiểm tra `--feature_dir`, đảm bảo tên file trùng với `item["feature"]` hoặc `item["video_id"] + ".pt"`
 
 ### Lỗi: "timestamps không khớp duration"
-- **Nguyên nhân**: t_end > duration
-- **Giải pháp**: Kiểm tra JSON, t_end phải ≤ duration
+- **Nguyên nhân**: t_end > duration hoặc format không đúng
+- **Giải pháp**: Kiểm tra JSON, t_end phải ≤ duration, timestamps phải là `[[t0, t1], ...]`
 
-### Lỗi: CUDA/Memory
-- **Giải pháp**: Giảm `batch_size` hoặc `max_feats`
+### Lỗi: Feature shape không khớp
+- **Nguyên nhân**: `max_feats` training khác infer, hoặc feature embedding dim sai
+- **Giải pháp**: 
+  ```bash
+  # Nếu training dùng max_feats=100, infer cũng phải dùng:
+  python infer.py ... --max_feats 100
+  ```
+
+### Lỗi: CUDA out of memory
+- **Giải pháp**: Giảm `--batch_size` (thử 2 hoặc 1) hoặc giảm `--max_feats`
+
+### Lỗi: Model expects checkpoint nhưng không match
+- **Nguyên nhân**: Checkpoint được train với config khác (num_bins, model size, v.v.)
+- **Giải pháp**: Đảm bảo `--t5_path`, `--num_bins`, `--max_feats` giống lúc training
 
 ### Encoding file không đúng
 - **Giải pháp**: Dùng UTF-8 encoding khi lưu JSON/README
-
----
-
-## Đóng góp & Cải thiện
-
-Các hướng phát triển tiếp theo:
-1. [ ] Script tự động extract features từ video gốc
-2. [ ] Split train/val/test từ dữ liệu raw
-3. [ ] Tokenizer tuỳ chỉnh cho Tiếng Việt
-4. [ ] Evaluation metrics (BLEU, METEOR, CIDEr)
-5. [ ] Multi-modal embedding improvements
-
----
-
-## Ghi chú quan trọng
-
-- Luôn kiểm tra `duration` vs `timestamps` trong dữ liệu
-- Feature file phải có shape (T, D) hoặc (1, T, D)
-- Sử dụng UTF-8 encoding cho JSON files
-- Backup checkpoint trước khi training lâu
-- Monitor loss trên validation set để tránh overfitting
+  ```python
+  import json
+  with open("data.json", "w", encoding="utf-8") as f:
+      json.dump(data, f, ensure_ascii=False, indent=2)
+  ```
 
 ---
